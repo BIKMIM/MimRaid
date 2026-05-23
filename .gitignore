@@ -1,0 +1,23 @@
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code 로컬 설정 (개인 환경 — 공유 X)
+.claude/
+
+# Backup / temp
+*.bak
+*.tmp
+*.orig
+*~
+
+# WoW 런타임 (애드온 폴더 안에 있을 일 거의 없지만 안전망)
+WTF/
+Cache/
