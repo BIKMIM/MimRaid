@@ -107,8 +107,8 @@ if errorlevel 1 (
 )
 
 rem Settings.lua: MR.VERSION = "X.Y.Z"
-rem [char]34 트릭으로 큰따옴표 동적 생성 — bat 안의 escape 회피 (single-quoted 문자열만 사용)
-powershell -NoProfile -Command "$q=[char]34; $pattern=('MR\.VERSION\s*=\s*' + $q + '[^' + $q + ']*' + $q); $replace=('MR.VERSION = ' + $q + '!NEW_VER!' + $q); $c=(Get-Content '%LUA_PATH%' -Raw -Encoding UTF8) -replace $pattern, $replace; [System.IO.File]::WriteAllText('%LUA_PATH%', $c, (New-Object System.Text.UTF8Encoding $false))"
+rem [char]34 트릭으로 큰따옴표 동적 생성, 패턴은 \S* 사용 (cmd 의 ^ escape 회피)
+powershell -NoProfile -Command "$q=[char]34; $c=(Get-Content '%LUA_PATH%' -Raw -Encoding UTF8) -replace ('MR\.VERSION\s*=\s*' + $q + '\S*' + $q), ('MR.VERSION = ' + $q + '!NEW_VER!' + $q); [System.IO.File]::WriteAllText('%LUA_PATH%', $c, (New-Object System.Text.UTF8Encoding $false))"
 if errorlevel 1 (
     echo.
     echo [ERROR] Failed to update Settings.lua
@@ -160,7 +160,7 @@ echo [3/3] Push done
 echo.
 
 echo ================================
-echo    Done!  v!NEW_VER!
+echo    Done^^!  v!NEW_VER!
 echo ================================
 echo.
 pause
