@@ -7,7 +7,7 @@ MimRaid = {}
 local MR = MimRaid
 
 -- 버전
-MR.VERSION = "0.9.96"
+MR.VERSION = "0.9.97"
 
 --------------------------------------------------------------------------------
 -- 기본 설정값 (SavedVariables 없을 때 사용)
@@ -467,13 +467,19 @@ end
 
 -- 같은 서버: "이름", 다른 서버: "이름-서버"
 -- secret string 방어: UnitName 결과가 secret 일 수 있으므로 Ambiguate 로 정규화
+-- CRITICAL: UnitName(unit) 은 다른 서버 사람에게 (name, realm) 두 값 반환 — pcall 의 두 번째
+-- 반환값(name)만 받으면 realm 정보 손실 → CanonicalName 이 잘못된 realm(현재 서버)을 붙여
+-- NamesMatch 가 실패 → 다른 서버 낙찰자와의 거래가 PENDING 그대로 미납 잔존 (v0.9.96 버그).
 function MR.FullName(unit)
-    local ok, name = pcall(UnitName, unit)
+    local ok, name, realm = pcall(UnitName, unit)
     if not ok or not name then return nil end
-    local safe = sanitizeName(name)
-    if not safe then return nil end
-    -- Ambiguate 는 이미 "이름-서버" 형태로 반환하므로 realm 처리 불필요
-    return safe
+    -- 다른 서버 사람: realm 정보 직접 합쳐서 풀네임 보존
+    if realm and realm ~= "" then
+        local full = name .. "-" .. realm
+        return sanitizeName(full) or full
+    end
+    -- 같은 서버: realm=nil. 짧은 이름 그대로 (CanonicalName 이 현재 서버 붙여 정규화)
+    return sanitizeName(name) or name
 end
 
 -- 채팅 출력용 기본 이름: "이름-서버"에서 서버 제거
