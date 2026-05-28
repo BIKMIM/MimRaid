@@ -7,7 +7,7 @@ MimRaid = {}
 local MR = MimRaid
 
 -- 버전
-MR.VERSION = "0.9.98"
+MR.VERSION = "0.9.99"
 
 --------------------------------------------------------------------------------
 -- 기본 설정값 (SavedVariables 없을 때 사용)
@@ -456,9 +456,7 @@ local function sanitizeName(name)
     if Ambiguate then
         local ok, safe = pcall(Ambiguate, name, "none")
         if ok and type(safe) == "string" then
-            local ok2, empty = pcall(function() return safe == "" end)
-            if ok2 and not empty then return safe end
-            if not ok2 then return safe end  -- 검사 자체가 실패해도 이름은 유효한 secret
+            return safe  -- Ambiguate 결과가 secret string 이어도 그대로 반환 (== "" 비교 금지)
         end
     end
     -- Ambiguate 실패: 원본 그대로 돌려줌 (호출자가 pcall 로 써야 함)
