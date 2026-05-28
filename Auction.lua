@@ -1627,8 +1627,14 @@ function MR.Auction._finalizeTrade(result)
         or MR.FullName(UnitExists("NPC") and "NPC" or "target")
         or ""
 
+    local function isBlank(s)
+        if not s then return true end
+        local ok, empty = pcall(function() return s == "" end)
+        return ok and empty
+    end
+
     if result == "cancelled" then
-        if tradeTarget ~= "" then
+        if not isBlank(tradeTarget) then
             _logTradeSummary(tradeTarget, "cancelled")
         else
             MR.Debug("[Trade] cancelled audit SKIP: target empty")
@@ -1654,9 +1660,12 @@ function MR.Auction.OnTradeAccept()
         or MR.FullName(UnitExists("NPC") and "NPC" or "target")
         or ""
 
-    if not tradeTarget or tradeTarget == "" then
-        MR.Print("[거래감지] 대상 이름 없음. 거래 기록 불가", MR.COLOR.red)
-        return
+    do
+        local ok, empty = pcall(function() return tradeTarget == "" end)
+        if not ok or empty then
+            MR.Print("[거래감지] 대상 이름 없음. 거래 기록 불가", MR.COLOR.red)
+            return
+        end
     end
 
     -- 완전 추적: 모든 거래에 대해 요약 entry 추가 (감사용. 분배 영향 없음).
