@@ -913,8 +913,11 @@ local function fillEventMeta(eventTitle, hour24, minute, description)
 end
 
 -- 4) 명단 일괄 초대
--- 와우 서버의 invite rate limit (시간당 N회) 를 피하기 위해 1.5초 간격으로 throttle
--- 진행상황 표시: 5명마다 채팅 + 매번 sumCount 라이브 갱신
+-- 와우 서버의 invite rate limit 회피용 2초 간격 throttle.
+-- "이미 초대된 사람" (와우 달력에서 수동 추가/이전 호출/organizer 자동포함) 은 EventInvite 호출
+-- 자체를 스킵해 2초 wait 도 안 함 (rate limit 무관). 매 step 직전에 invitees 새로 스캔하므로
+-- 와우 달력 UI 에서 수동 추가/삭제도 즉시 반영. 성공/실패는 checkResults 가 실제 invitee 명단
+-- 기준으로 판정하므로 스킵된 사람도 자동 성공 처리됨.
 local INVITE_INTERVAL = 2.0  -- 실측 안정값 (1.0s/1.5s 절반 실패, 2.0s 전부 성공)
 local function inviteAll(names, onComplete)
     if not (C_Calendar and C_Calendar.EventInvite) then
@@ -923,24 +926,84 @@ local function inviteAll(names, onComplete)
     end
     local total = #names
     local i = 1
+    local invitedCount = 0   -- 실제 EventInvite 호출 횟수
+    local skippedCount = 0   -- 이미 초대돼있어서 스킵된 횟수
+
+    -- 현재 이벤트의 초대 명단을 set 으로 반환. 모든 API 호출 pcall 보호 (안전 최우선).
+    -- WoW 환경에 따라 same-realm 사람이 짧은이름/풀네임 어느 쪽으로 오는지 다를 수 있어
+    -- set 에 양쪽 다 등록 (입력도 양쪽 다 체크).
+    local function refreshAlreadyInvited()
+        local set = {}
+        if not (C_Calendar and C_Calendar.GetNumInvites) then return set end
+        local n = 0
+        local ok = pcall(function() n = C_Calendar.GetNumInvites() or 0 end)
+        if not ok or type(n) ~= "number" or n <= 0 then return set end
+        for j = 1, n do
+            local info
+            local okI = pcall(function() info = C_Calendar.EventGetInvite(j) end)
+            if okI and info and info.name then
+                set[info.name] = true
+                local okM, short = pcall(function() return info.name:match("^([^%-]+)") end)
+                if okM and short and short ~= "" then set[short] = true end
+            end
+        end
+        return set
+    end
+
     local function step()
-        if i > total then
-            if onComplete then onComplete(true) end
-            return
-        end
-        pcall(C_Calendar.EventInvite, names[i])
+        -- while + return 패턴: 스킵 연속 처리 시 재귀 회피 (스택 안전)
+        while i <= total do
+            local name = names[i]
+            if not name or name == "" then
+                -- 빈 이름 방어 → 다음
+                i = i + 1
+            else
+                local short
+                pcall(function() short = name:match("^([^%-]+)") end)
 
-        -- 진행 표시
-        if CI.sumCount then
-            CI.sumCount:SetText(string.format("초대 진행 중: %d/%d", i, total))
-        end
-        if (i % 5 == 0 or i == total) and MR.Print then
-            MR.Print(string.format("[달초] 진행 중... %d/%d", i, total),
-                MR.COLOR and MR.COLOR.gray or {0.7,0.7,0.7})
+                local already = refreshAlreadyInvited()
+                if already[name] or (short and already[short]) then
+                    -- 이미 초대됨 → 즉시 스킵 (2초 wait 없음, EventInvite 호출 없음 → rate limit 무관)
+                    skippedCount = skippedCount + 1
+                    if CI.sumCount then
+                        CI.sumCount:SetText(string.format(
+                            "초대 진행 중: %d/%d (신규 %d / 스킵 %d)",
+                            i, total, invitedCount, skippedCount))
+                    end
+                    i = i + 1
+                    -- loop 계속 → 다음 이름 즉시 검사
+                else
+                    -- 신규 초대 → EventInvite + 2초 wait
+                    pcall(C_Calendar.EventInvite, name)
+                    invitedCount = invitedCount + 1
+
+                    if CI.sumCount then
+                        CI.sumCount:SetText(string.format(
+                            "초대 진행 중: %d/%d (신규 %d / 스킵 %d)",
+                            i, total, invitedCount, skippedCount))
+                    end
+                    if (i % 5 == 0 or i == total) and MR.Print then
+                        MR.Print(string.format(
+                            "[달초] 진행 중... %d/%d (신규 %d / 스킵 %d)",
+                            i, total, invitedCount, skippedCount),
+                            MR.COLOR and MR.COLOR.gray or {0.7,0.7,0.7})
+                    end
+
+                    i = i + 1
+                    C_Timer.After(INVITE_INTERVAL, step)
+                    return   -- 다음 step 은 timer 콜백에서 진입
+                end
+            end
         end
 
-        i = i + 1
-        C_Timer.After(INVITE_INTERVAL, step)
+        -- 종료: 모든 이름 처리 완료
+        if MR.Print then
+            MR.Print(string.format(
+                "[달초] 완료: 신규 초대 %d명 / 스킵 %d명 (이미 초대됨)",
+                invitedCount, skippedCount),
+                MR.COLOR and MR.COLOR.gold or {1, 0.82, 0})
+        end
+        if onComplete then onComplete(true) end
     end
     step()
 end

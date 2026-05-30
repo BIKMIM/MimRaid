@@ -505,11 +505,18 @@ handlers["PLAYER_ENTERING_WORLD"] = function(isInitialLogin, isReloadingUi)
     -- 최초 로그인·UI 리로드는 무시
     if isInitialLogin or isReloadingUi then return end
 
-    local _, instanceType = GetInstanceInfo()
+    local instanceName, instanceType = GetInstanceInfo()
     local prevType = _lastInstanceType
     _lastInstanceType = instanceType
 
-    local hasData = (#MR.TradeLog > 0 or #MR.ItemList > 0)
+    local tradeN, itemN = #MR.TradeLog, #MR.ItemList
+    local hasData = (tradeN > 0 or itemN > 0)
+
+    -- 진단 로그: 팝업이 안 떠서 의문일 때 원인 파악용
+    MR.Debug(string.format(
+        "PEW: instance=%s type=%s prev=%s tradeLog=%d itemList=%d hasData=%s",
+        tostring(instanceName), tostring(instanceType), tostring(prevType),
+        tradeN, itemN, tostring(hasData)))
 
     -- 인스턴스 → 야외 전환 시: 기록이 있으면 초기화 제안 팝업.
     -- 사용자가 초기화 선택 시 RaidTimer 도 함께 리셋됨 (popup OnAccept 에 포함됨).
@@ -524,8 +531,8 @@ handlers["PLAYER_ENTERING_WORLD"] = function(isInitialLogin, isReloadingUi)
     -- 5인 던전 (party): CHALLENGE_MODE_START 가 쐐기 시작 시 자동 Reset → 팝업 불필요
     if instanceType == "party" then return end
 
-    -- 레이드: 기록이 있으면 팝업
-    if instanceType == "raid" and hasData then
+    -- 레이드 + 일부 시나리오형 레이드(scenario) 도 포함: 기록이 있으면 팝업
+    if (instanceType == "raid" or instanceType == "scenario") and hasData then
         StaticPopup_Show("MIMRAID_RESET_CONFIRM")
     end
 end

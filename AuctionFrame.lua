@@ -174,13 +174,37 @@ timerResetBtn:SetScript("OnClick", function()
     StaticPopup_Show("MIMRAID_TIMER_RESET_CONFIRM")
 end)
 
+-- 2행: 레이드 초기화 버튼 — 시간리셋 버튼 좌측에 딱 붙여서 (간격 0).
+-- 기능: MIMRAID_RESET_CONFIRM 팝업 트리거 (TradeLog/ItemList/FailedItems + RaidTimer + Auction 전부 초기화).
+-- 새 인스턴스 진입 시 자동 팝업이 안 떴을 때 (데이터 0건 등) 수동 trigger 용.
+local raidResetBtn = CreateFrame("Button", nil, titleBar, "UIPanelButtonTemplate")
+raidResetBtn:SetSize(96, 24)
+raidResetBtn:SetPoint("RIGHT", timerResetBtn, "LEFT", 0, 0)
+raidResetBtn:SetText("레이드 초기화")
+do
+    local fs = raidResetBtn:GetFontString()
+    if fs then fs:SetFont(FONT, 11) end
+end
+raidResetBtn:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText("레이드 전체 초기화", 1, 1, 1)
+    GameTooltip:AddLine("거래 기록 / 안팔린 아이템 / 경매 대기 + 타이머 모두 삭제",
+        1, 0.82, 0, true)
+    GameTooltip:AddLine("(되돌릴 수 없음)", 1, 0.3, 0.3)
+    GameTooltip:Show()
+end)
+raidResetBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+raidResetBtn:SetScript("OnClick", function()
+    StaticPopup_Show("MIMRAID_RESET_CONFIRM")
+end)
+
 -- 2행: 던전/레이드 이름 + (M+ 활성시) 단수 — elapsedLine/리셋버튼 좌측 영역, 가운데 정렬
 -- 형식: "사론의 구덩이 +14 단"  (M+) / "맨소러스의 권능"  (레이드/일반 던전)
 -- 인스턴스 밖이면 마지막 텍스트 그대로 유지
 local mplusLine = titleBar:CreateFontString(nil, "OVERLAY")
 mplusLine:SetFont(FONT, 13)
 mplusLine:SetPoint("LEFT",  titleBar, "LEFT", 56, -11)
-mplusLine:SetPoint("RIGHT", timerResetBtn, "LEFT", -8, 0)
+mplusLine:SetPoint("RIGHT", raidResetBtn, "LEFT", -8, 0)
 mplusLine:SetJustifyH("CENTER")
 mplusLine:SetTextColor(1.0, 0.82, 0.0)   -- 골드 톤
 mplusLine:SetText("")
@@ -247,9 +271,10 @@ titleBar:SetScript("OnUpdate", function(_, elapsed)
     local startT = MR.RaidTimer.GetStartTime and MR.RaidTimer.GetStartTime()
     if startT then
         local d = date("*t", startT)
+        -- 년도 생략 (폭 좁아 잘림 방지) — 레이드 운영상 같은 해 안이라 년도 필요성 낮음
         startLine:SetText(string.format(
-            "출발 시간 : %04d년 %02d월 %02d일(%s) %02d:%02d:%02d",
-            d.year, d.month, d.day, WEEKDAY_KR[d.wday] or "?", d.hour, d.min, d.sec))
+            "출발 시간 : %02d월 %02d일(%s) %02d:%02d:%02d",
+            d.month, d.day, WEEKDAY_KR[d.wday] or "?", d.hour, d.min, d.sec))
     else
         startLine:SetText("")
     end
