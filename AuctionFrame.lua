@@ -115,20 +115,24 @@ startInstanceLine:SetTextColor(1.0, 0.82, 0.0)   -- 골드 톤
 startInstanceLine:SetText("")
 
 -- 1행 우측: 출발 시간 (시작던전 우측부터 닫기 버튼 좌측까지, 우측 정렬)
+-- SetWordWrap(false): 폭 부족 시 wrap 으로 2줄 되어 경과시간과 겹치는 것 방지.
+-- 폭 부족 시 자동 truncate (시작 부분부터 보임 — RIGHT 정렬이라 끝 시간 부분 보존).
 local startLine = titleBar:CreateFontString(nil, "OVERLAY")
 startLine:SetFont(FONT, 11)
 startLine:SetPoint("TOPLEFT",  startInstanceLine, "TOPRIGHT",  8, 0)
 startLine:SetPoint("TOPRIGHT", titleBar, "TOPRIGHT", -28, -7)
 startLine:SetJustifyH("RIGHT")
+startLine:SetWordWrap(false)
 startLine:SetText("")
 
--- 2행: 경과 시간 — 우측 고정, 고정 폭으로 버튼과 세로 중앙 정렬
--- RIGHT 앵커(세로 중앙) + SetWidth 로 텍스트 박스 크기 고정
+-- 2행: 경과 시간 — 우측 고정, 우측 정렬 (출발 시간과 통일).
+-- 폭은 HH:MM:SS 압축 형식 기준으로 줄여서 (220 → 160) 더 컴팩트하게.
 local elapsedLine = titleBar:CreateFontString(nil, "OVERLAY")
 elapsedLine:SetFont(FONT, 13)
 elapsedLine:SetPoint("RIGHT", titleBar, "RIGHT", -28, -11)
-elapsedLine:SetWidth(220)   -- 고정 폭: 경과시간 숫자 변동에 따른 좌측 흔들림 방지 (리셋버튼 위치 고정)
-elapsedLine:SetJustifyH("LEFT")
+elapsedLine:SetWidth(160)
+elapsedLine:SetJustifyH("RIGHT")
+elapsedLine:SetWordWrap(false)
 elapsedLine:SetText("")
 
 -- 2행: 시간리셋 버튼 — elapsedLine 바로 좌측에 세로 중앙 정렬
@@ -238,18 +242,18 @@ titleBar:SetScript("OnUpdate", function(_, elapsed)
     -- 시작 던전 이름 (RaidTimer 시작 시점에 GetInstanceInfo 로 캐시된 값)
     local startInstance = MR.RaidTimer.GetInstanceName and MR.RaidTimer.GetInstanceName()
     startInstanceLine:SetText(startInstance or "")
-    -- 출발 시간: YYYY년 MM월 DD일(요일) HH시 MM분 SS초
+    -- 출발 시간: 1줄 압축 (시간 부분 HH:MM:SS — 경과 시간과 겹침 방지).
+    -- 이전엔 2줄 분할 (날짜 / 시간) 이었으나 시작 던전명 추가 + 헤더 공간 부족으로 겹침 발생.
     local startT = MR.RaidTimer.GetStartTime and MR.RaidTimer.GetStartTime()
     if startT then
         local d = date("*t", startT)
-        -- 명시적 2줄 (1줄: 날짜+요일 / 2줄: 시간) — 폭에 따른 wrap 흔들림 방지
         startLine:SetText(string.format(
-            "출발 시간 :  %04d년 %02d월 %02d일(%s)\n%02d시 %02d분 %02d초",
+            "출발 시간 : %04d년 %02d월 %02d일(%s) %02d:%02d:%02d",
             d.year, d.month, d.day, WEEKDAY_KR[d.wday] or "?", d.hour, d.min, d.sec))
     else
         startLine:SetText("")
     end
-    -- 경과 시간: (DD일) HH시간 MM분 SS초
+    -- 경과 시간: 출발 시간과 통일된 HH:MM:SS 형식 (1일 이상이면 "Nd HH:MM:SS")
     local totalSec  = math.floor(t)
     local s         = totalSec % 60
     local totalMin  = math.floor(totalSec / 60)
@@ -259,11 +263,9 @@ titleBar:SetScript("OnUpdate", function(_, elapsed)
     local days      = math.floor(totalHour / 24)
     local elapsedStr
     if days > 0 then
-        elapsedStr = string.format(
-            "경과 :  %d일  %02d시간 %02d분 %02d초", days, h, m, s)
+        elapsedStr = string.format("경과 : %d일 %02d:%02d:%02d", days, h, m, s)
     else
-        elapsedStr = string.format(
-            "경과 :  %02d시간 %02d분 %02d초", h, m, s)
+        elapsedStr = string.format("경과 : %02d:%02d:%02d", h, m, s)
     end
     if MR.RaidTimer.frozenElapsed then
         elapsedLine:SetTextColor(0.6, 0.6, 0.6)

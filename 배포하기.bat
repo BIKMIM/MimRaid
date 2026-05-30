@@ -49,7 +49,9 @@ if exist "%~dp0.deploy-msg" (
     set /p SUGGESTED=<"%~dp0.deploy-msg"
 )
 if "!SUGGESTED!"=="" (
-    powershell -NoProfile -Command "$f = git status --short | ForEach-Object { ($_ -replace '^...','').Trim() } | Where-Object { $_ -match '\.(lua|xml|toc)$' -and $_ -notmatch '(MimRaid\.toc|Settings\.lua)$' } | ForEach-Object { Split-Path $_ -Leaf } | Select-Object -Unique; if ($f) { 'Update ' + ($f -join ', ') } | Out-File -Encoding utf8 '%TEMP%\mimraid_msg.txt' -NoNewline" 2>nul
+    rem if () {} 블록 안으로 pipe 를 옮김 (PowerShell 의 "if 결과 → pipe" 는 syntax 에러).
+    rem BOM 없는 UTF-8 로 저장해 set /p 가 첫 글자에 BOM 읽지 않도록.
+    powershell -NoProfile -Command "$f = git status --short | ForEach-Object { ($_ -replace '^...','').Trim() } | Where-Object { $_ -match '\.(lua|xml|toc)$' -and $_ -notmatch '(MimRaid\.toc|Settings\.lua)$' } | ForEach-Object { Split-Path $_ -Leaf } | Select-Object -Unique; if ($f) { [System.IO.File]::WriteAllText('%TEMP%\mimraid_msg.txt', 'Update ' + ($f -join ', '), (New-Object System.Text.UTF8Encoding $false)) }" 2>nul
     if exist "%TEMP%\mimraid_msg.txt" (
         set /p SUGGESTED=<"%TEMP%\mimraid_msg.txt"
         del "%TEMP%\mimraid_msg.txt" >nul 2>&1
