@@ -1111,6 +1111,24 @@ function MR.LoadSettleAdjust()
     if MR.RefreshSettlePanel then MR.RefreshSettlePanel() end
 end
 
+-- 골드 분배 탭의 수동 입력값 (조정 금액 / 분배 인원 / 끝자리 정리) 모두 초기화.
+-- MIMRAID_RESET_CONFIRM 팝업의 OnAccept 에서 호출됨 (레이드 초기화 시 함께 비우기).
+-- 모든 단계 pcall 로 보호 — 한 부분 실패해도 나머지 진행.
+function MR.ResetSettleInputs()
+    if MR.GetCharData then
+        local ok, cdata = pcall(MR.GetCharData)
+        if ok and cdata then
+            cdata.settleMembers = nil
+            cdata.settleAdjust  = nil
+            cdata.settleRpp     = nil
+        end
+    end
+    _settleRpp = nil
+    pcall(function() if adjustBox then adjustBox:SetText("") end end)
+    pcall(function() if memberBox then memberBox:SetText("1") end end)
+    if MR.RefreshSettlePanel then pcall(MR.RefreshSettlePanel) end
+end
+
 --------------------------------------------------------------------------------
 -- [안팔린 아이템] 패널 = MR.FailedPanel
 --------------------------------------------------------------------------------

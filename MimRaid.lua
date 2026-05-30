@@ -487,6 +487,8 @@ StaticPopupDialogs["MIMRAID_RESET_CONFIRM"] = {
         MR.TradeLog.Clear()
         MR.FailedItems.Clear()
         MR.RaidTimer.Reset()
+        -- 골드 분배 탭의 수동 입력값 (조정 금액 / 분배 인원 / 끝자리 정리) 도 함께 초기화
+        if MR.ResetSettleInputs then pcall(MR.ResetSettleInputs) end
         MR.Print("경매 기록 초기화 완료", MR.COLOR.green)
     end,
     timeout   = 0,
