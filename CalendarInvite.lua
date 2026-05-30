@@ -458,20 +458,27 @@ local function lookupClassFile(name)
     local inRaid = IsInRaid and IsInRaid()
     local prefix = inRaid and "raid" or "party"
     local n = GetNumGroupMembers and GetNumGroupMembers() or 0
+    -- UnitName/UnitClass 가 보스 컨텍스트에서 secret-taint 값을 반환할 수 있어 pcall 보호.
+    -- taint 된 string 에 :match 직접 호출 시 ADDON_ACTION_FORBIDDEN.
     for i = 1, n do
         local unit = prefix .. i
-        local unitName = UnitName(unit)
-        if unitName then
-            local uShort = unitName:match("^([^%-]+)") or unitName
-            if uShort == short then
-                return select(2, UnitClass(unit))
+        local ok, unitName = pcall(UnitName, unit)
+        if ok and unitName then
+            local ok2, uShort = pcall(function() return unitName:match("^([^%-]+)") or unitName end)
+            if ok2 and uShort == short then
+                local ok3, classFile = pcall(function() return select(2, UnitClass(unit)) end)
+                if ok3 then return classFile end
             end
         end
     end
     -- 본인 (파티/레이드 인덱스에 자기 안 들어가는 케이스 대비)
-    local myShort = (UnitName("player") or ""):match("^([^%-]+)")
-    if myShort == short then
-        return select(2, UnitClass("player"))
+    local okP, playerName = pcall(UnitName, "player")
+    if okP and playerName then
+        local okM, myShort = pcall(function() return playerName:match("^([^%-]+)") end)
+        if okM and myShort == short then
+            local okC, classFile = pcall(function() return select(2, UnitClass("player")) end)
+            if okC then return classFile end
+        end
     end
     return nil
 end

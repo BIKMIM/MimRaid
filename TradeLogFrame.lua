@@ -44,23 +44,39 @@ end
 --------------------------------------------------------------------------------
 -- 플레이어 우클릭 컨텍스트 메뉴 (공유)
 --------------------------------------------------------------------------------
+-- 전투중 protected API 가드 (WoW 11.x 최근 패치에서 ADDON_ACTION_FORBIDDEN 강화).
+-- ChatFrame_OpenChat / C_PartyInfo.InviteUnit / InitiateTrade 모두 전투중 차단됨.
+local function _combatBlockedNotice(action)
+    if InCombatLockdown and InCombatLockdown() then
+        if MR.Print and MR.COLOR then
+            MR.Print("전투 중에는 " .. action .. " 할 수 없습니다.", MR.COLOR.orange)
+        end
+        return true
+    end
+    return false
+end
+
 local function showPlayerMenu(name)
     if not name or name == "" or name == "?" then return end
     local shortName = name:match("^([^%-]+)") or name  -- 레이드 유닛 스캔용
     MenuUtil.CreateContextMenu(UIParent, function(_, rootDescription)
         rootDescription:CreateTitle(name)
         rootDescription:CreateButton("귓속말", function()
+            if _combatBlockedNotice("귓속말 창 열기를") then return end
             ChatFrame_OpenChat("/w " .. name .. " ", DEFAULT_CHAT_FRAME)
         end)
         rootDescription:CreateButton("레이드/파티 초대", function()
+            if _combatBlockedNotice("초대를") then return end
             C_PartyInfo.InviteUnit(name)
         end)
         -- 현재 레이드에 있을 때만 거래 메뉴 표시
+        -- UnitName 은 secret-taintable → pcall 로 보호
         for i = 1, GetNumGroupMembers() do
-            local n = UnitName("raid" .. i)
-            if n == shortName then
+            local ok, n = pcall(UnitName, "raid" .. i)
+            if ok and n == shortName then
                 local unitId = "raid" .. i
                 rootDescription:CreateButton("거래 신청", function()
+                    if _combatBlockedNotice("거래를") then return end
                     InitiateTrade(unitId)
                 end)
                 break
@@ -246,16 +262,20 @@ local function createLogRow(i)
                     local shortName = name:match("^([^%-]+)") or name
                     rootDescription:CreateTitle(name)
                     rootDescription:CreateButton("귓속말", function()
+                        if _combatBlockedNotice("귓속말 창 열기를") then return end
                         ChatFrame_OpenChat("/w " .. shortName .. " ", DEFAULT_CHAT_FRAME)
                     end)
                     rootDescription:CreateButton("레이드/파티 초대", function()
+                        if _combatBlockedNotice("초대를") then return end
                         C_PartyInfo.InviteUnit(shortName)
                     end)
+                    -- UnitName 은 secret-taintable → pcall 로 보호
                     for ri = 1, GetNumGroupMembers() do
-                        local n = UnitName("raid" .. ri)
-                        if n == shortName then
+                        local ok, n = pcall(UnitName, "raid" .. ri)
+                        if ok and n == shortName then
                             local unitId = "raid" .. ri
                             rootDescription:CreateButton("거래 신청", function()
+                                if _combatBlockedNotice("거래를") then return end
                                 InitiateTrade(unitId)
                             end)
                             break

@@ -450,21 +450,43 @@ function MR.Auction.Sold()
             local wLink = linkAssign[i]
             local logIdx = MR.TradeLog.Add(wLink, item.itemName, item.texture, wName, uniformPrice, item.bossGroup)
 
-            -- 가상 낙찰 거래가 Sold() 전에 완료되었던 경우: 디퍼된 paidGold 즉시 적용
+            -- 가상 낙찰 거래가 Sold() 전에 완료되었던 경우: 디퍼된 paidGold 즉시 적용.
+            -- 매칭 우선순위: (1) name + paidGold==uniformPrice 정확 일치, (2) name + bid==uniformPrice,
+            -- (3) name 만 (마지막 폴백). 정확 일치를 먼저 시도해서 같은 사람이 여러 deferred 를
+            -- 쌓은 케이스 (다중 슬롯 입찰 + 여러 가상낙찰) 에서 잘못된 항목에 paid 가 적용되는
+            -- silent-loss 를 방어.
             local matchedDeferred = false
             if MR.Auction._deferredPreliminary then
-                for di = #MR.Auction._deferredPreliminary, 1, -1 do
-                    local d = MR.Auction._deferredPreliminary[di]
-                    if MR.NamesMatch(d.name, wName) then
-                        MR.TradeLog.UpdateTrade(logIdx, d.paidGold)
-                        MR.Print(string.format(
-                            "[가상 낙찰 확정] %s 거래 기록 완료 (납부 %s / 낙찰가 %s)",
-                            wName, MR.FormatGold(d.paidGold), MR.FormatGold(uniformPrice)),
-                            MR.COLOR.green)
-                        table.remove(MR.Auction._deferredPreliminary, di)
-                        matchedDeferred = true
-                        break
+                local function _tryMatch(predicate)
+                    for di = #MR.Auction._deferredPreliminary, 1, -1 do
+                        local d = MR.Auction._deferredPreliminary[di]
+                        if predicate(d) then
+                            MR.TradeLog.UpdateTrade(logIdx, d.paidGold)
+                            MR.Print(string.format(
+                                "[가상 낙찰 확정] %s 거래 기록 완료 (납부 %s / 낙찰가 %s)",
+                                wName, MR.FormatGold(d.paidGold), MR.FormatGold(uniformPrice)),
+                                MR.COLOR.green)
+                            table.remove(MR.Auction._deferredPreliminary, di)
+                            return true
+                        end
                     end
+                    return false
+                end
+                -- 1차: paid 가 균일가와 정확히 일치 (가장 신뢰)
+                matchedDeferred = _tryMatch(function(d)
+                    return MR.NamesMatch(d.name, wName) and d.paidGold == uniformPrice
+                end)
+                -- 2차: bid (가상 낙찰 시점 입찰가) 가 현재 균일가와 일치
+                if not matchedDeferred then
+                    matchedDeferred = _tryMatch(function(d)
+                        return MR.NamesMatch(d.name, wName) and (d.bid or 0) == uniformPrice
+                    end)
+                end
+                -- 3차: 이름만 (호환 폴백 — 기존 동작 보존)
+                if not matchedDeferred then
+                    matchedDeferred = _tryMatch(function(d)
+                        return MR.NamesMatch(d.name, wName)
+                    end)
                 end
             end
 
@@ -541,8 +563,15 @@ function MR.Auction.Sold()
         tostring(removedIndex), tostring(AC.sequential)))
     C_Timer.After(2, function()
         MR.Debug(string.format(
-            "post-sold timer FIRE: state=%s sequential=%s",
-            tostring(AC.state), tostring(AC.sequential)))
+            "post-sold timer FIRE: state=%s sequential=%s pausedByEncounter=%s",
+            tostring(AC.state), tostring(AC.sequential), tostring(AC.pausedByEncounter)))
+        -- 2초 사이 ENCOUNTER_START 발화 시: Reset 이 pausedByEncounter=false 로 덮어쓰면서
+        -- 보스 전투 중 "재개" 메시지/카운트다운이 오발화될 수 있음. 인카운터 / 로딩 중이면
+        -- Reset 과 TryAdvance 모두 보류 (재개는 OnEncounterEnd / OnPlayerEnteringWorld 에서).
+        if AC.pausedByEncounter or AC.pausedByLoading then
+            MR.Debug("post-sold SKIP: paused by encounter/loading")
+            return
+        end
         MR.Auction.Reset()
         MR.Auction.TryAdvance(removedIndex)
     end)
@@ -1348,12 +1377,23 @@ function MR.Auction.OnTradePlayerItemChanged()
     if AC.placementQueue and #AC.placementQueue > 0 then
         local job = AC.placementQueue[1]
         local placedLink = GetTradePlayerItemLink(job.slotIdx)
+        -- itemID 일치 검증: 자동 배치 직전 사용자가 동일 슬롯에 다른 아이템을 수동 배치한
+        -- 경우 큐가 잘못된 아이템을 "완료" 처리하고 다음 아이템을 다음 슬롯에 PickupContainerItem
+        -- 호출 → 의도와 다른 조합. itemID 일치할 때만 큐 pop, 아니면 다음 tick 에 재확인.
         if placedLink then
-            table.remove(AC.placementQueue, 1)
-            if #AC.placementQueue > 0 then
-                C_Timer.After(0.15, MR.Auction.StartPlacement)
+            local placedID = placedLink:match("item:(%d+)")
+            local expectedID = job.link and job.link:match("item:(%d+)")
+            if expectedID and placedID == expectedID then
+                table.remove(AC.placementQueue, 1)
+                if #AC.placementQueue > 0 then
+                    C_Timer.After(0.15, MR.Auction.StartPlacement)
+                else
+                    AC.placementQueue = nil
+                end
             else
-                AC.placementQueue = nil
+                MR.Debug(string.format(
+                    "[Placement] slot=%d 에 다른 아이템 발견 (expected=%s placed=%s) → 큐 pop 보류",
+                    job.slotIdx, tostring(expectedID), tostring(placedID)))
             end
         end
     end
@@ -1368,6 +1408,14 @@ end
 -- MimRaid.lua의 ADDON_LOADED에서 hooksecurefunc 등록
 --------------------------------------------------------------------------------
 function MR.Auction.OnTradeShow()
+    -- CRITICAL: 새 거래 시작 시점에 _alreadyFinalized 무조건 리셋.
+    -- 이유: 이전 거래의 ERR_TRADE_COMPLETE 가 _finalizeTrade 호출 → _alreadyFinalized=true 후
+    -- 어떤 이유(lockdown / 리로드 / 보스 시작)로 TRADE_CLOSED 미발화 → HideTradeOverlay 미호출
+    -- → _alreadyFinalized=true 가 다음 거래까지 잔존 → 다음 거래의 finalize 가 SKIP →
+    -- OnTradeAccept 자체가 실행 안 되어 낙찰자 통째로 미납 잔존하는 silent-loss.
+    -- HideTradeOverlay 도 같은 리셋을 하지만, 이 함수 자체가 누락된 경로 방어 차원으로 직접.
+    MR.Auction._alreadyFinalized = false
+
     -- 방어적 cleanup: 이전 거래가 비정상 종료(거리/전투/타임아웃) 되어 stale state 가
     -- 남아있을 수 있으므로 무조건 초기화 후 새 거래 컨텍스트를 구성한다.
     -- HideTradeOverlay 는 idempotent (이미 깨끗하면 no-op) 이라 안전.
@@ -1855,8 +1903,22 @@ function MR.Auction.OnTradeAccept()
     local expectedTotal = 0
     for _, w in ipairs(ctw) do expectedTotal = expectedTotal + (w.bid or 0) end
 
-    -- TRADE_CLOSED 이후에는 GetTargetTradeMoney()가 신뢰 불가 → 오버레이 캐시만 사용
-    local paidCopper = MR.Auction._lastTargetCopper or 0
+    -- TRADE_CLOSED 이후에는 GetTargetTradeMoney()가 신뢰 불가 → 오버레이 캐시만 사용.
+    -- _lastTargetCopper 가 nil 이면 TRADE_ACCEPT_UPDATE 가 (1,1) 도달 못한 race condition
+    -- (HideTradeOverlay 가 새 거래 시작 시 캐시 비움 → 이전 거래 stale 잔존 위험 차단).
+    -- 0 으로 silent fallback 하면 0원 기록되어 미납 잔존 → 가시 경고로 진단 가능하게.
+    local paidCopper = MR.Auction._lastTargetCopper
+    if paidCopper == nil then
+        MR.Print(string.format(
+            "[주의] %s 거래의 받은 금액 캐시가 비어있습니다. " ..
+            "TRADE_ACCEPT_UPDATE 누락 의심 — paidGold=0 으로 기록되어 미납 가능. " ..
+            "/mr debug on 으로 재현 시 로그 확인 권장.",
+            tradeTarget), MR.COLOR.red)
+        MR.Debug(string.format(
+            "[Trade] PAIDCOPPER-NIL target=%s ctw=%d alreadyFinalized=%s",
+            tostring(tradeTarget), #ctw, tostring(MR.Auction._alreadyFinalized)))
+        paidCopper = 0
+    end
     local paidGold   = math.min(math.floor((tonumber(paidCopper) or 0) / 10000), MR.MAX_GOLD)
 
     -- 골드 거래 자동 흡수: 동일 사람의 prior [골드 거래] DONE 엔트리를 FIFO 예산에 포함
@@ -1913,7 +1975,11 @@ function MR.Auction.OnTradeAccept()
             end
             if w._remainderOnly then
                 -- 잔액 결제: 기존 paidGold 에 누적 (UpdateTrade 는 SET 이므로 oldPaid + thisPay 로 호출)
-                local oldPaid = (w.logEntry and w.logEntry.paidGold) or 0
+                -- CRITICAL: oldPaid 를 w.logEntry 의 캐시값이 아니라 현재 TradeLog[logIdx] 에서
+                -- fresh 하게 읽음. w.logEntry 가 stale reference (Remove 후 dangling, 또는
+                -- 같은 entry 가 ctw 에 두 번 들어가서 첫 처리 후의 값) 인 경우의 누적 오류 방어.
+                local cur = MR.TradeLog[logIdx]
+                local oldPaid = (cur and cur.paidGold) or 0
                 MR.TradeLog.UpdateTrade(logIdx, oldPaid + thisPay)
             else
                 MR.TradeLog.UpdateTrade(logIdx, thisPay)

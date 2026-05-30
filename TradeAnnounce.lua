@@ -303,13 +303,16 @@ function TA.SendIfEnabled()
     dbg(string.format("send → %s : %d chunk(s)", target, #chunks))
 
     -- 청크 사이 0.4초 간격 (서버 스로틀 방지). 첫 청크는 즉시.
+    -- SafeSendChat 사용: 거래 종료 직후 ENCOUNTER_START 발화 race 방어.
+    -- (IsEncounterInProgress 중 SendChatMessage 직접 호출 시 ADDON_ACTION_FORBIDDEN 가능 →
+    --  SafeSendChat 가 인카운터 중에는 큐잉 후 ENCOUNTER_END 에서 자동 재개)
     for idx, chunk in ipairs(chunks) do
         local delay = (idx - 1) * 0.4
         if delay == 0 then
-            SendChatMessage(chunk, "WHISPER", nil, target)
+            MR.SafeSendChat(chunk, "WHISPER", nil, target)
         else
             C_Timer.After(delay, function()
-                SendChatMessage(chunk, "WHISPER", nil, target)
+                MR.SafeSendChat(chunk, "WHISPER", nil, target)
             end)
         end
     end
