@@ -106,24 +106,31 @@ titleText:SetText("MimRaid  v" .. MR.VERSION)
 -- 1행 가운데: 시작 던전 이름 (RaidTimer 시작 시점 캐시값, 고정 표시).
 -- 첫 던전부터 누적 타이머 시작점 확인 용도 — 레이드 1번에 여러 던전 공략할 때 어디서부터 시간 흘렀는지.
 -- 타이틀(MimRaid vX.X.X) 우측 ~ 출발시간 좌측 사이 영역에 가운데 정렬.
+-- 시작 던전: RIGHT 앵커만 사용 (LEFT 앵커 제거).
+-- 이유: titleLogo 가 세로 중앙 정렬 + titleText 폰트 13pt vs startInstanceLine 11pt 의 baseline 차이로
+-- titleText 기준 LEFT 앵커 시 y offset 일치가 어려움. RIGHT 앵커만 두면 startLine TOPLEFT 의 y(-7) 자동 상속
+-- → 두 라인 baseline 일치. textstring 폭은 텍스트 자연 길이로 자동.
 local startInstanceLine = titleBar:CreateFontString(nil, "OVERLAY")
 startInstanceLine:SetFont(FONT, 11)
-startInstanceLine:SetPoint("TOPLEFT", titleText, "TOPRIGHT", 16, 0)
-startInstanceLine:SetWidth(220)
 startInstanceLine:SetJustifyH("RIGHT")
+startInstanceLine:SetWordWrap(false)
 startInstanceLine:SetTextColor(1.0, 0.82, 0.0)   -- 골드 톤
 startInstanceLine:SetText("")
 
--- 1행 우측: 출발 시간 (시작던전 우측부터 닫기 버튼 좌측까지, 우측 정렬)
--- SetWordWrap(false): 폭 부족 시 wrap 으로 2줄 되어 경과시간과 겹치는 것 방지.
--- 폭 부족 시 자동 truncate (시작 부분부터 보임 — RIGHT 정렬이라 끝 시간 부분 보존).
+-- 1행 우측: 출발 시간 — RIGHT 앵커만 사용 (LEFT 앵커 없음).
+-- 이유: LEFT-RIGHT 두 앵커 + SetWordWrap(false) + RIGHT 정렬일 때 frame 폭이 크고 텍스트가 짧으면
+-- 텍스트가 frame 우측에 붙고 좌측에 큰 공백 → 시작 던전과의 갭이 어색하게 멀어 보임.
+-- RIGHT 앵커만 두면 textstring 폭이 텍스트 자연 길이만큼만 차지 → 시작 던전 우측에 자연 위치.
 local startLine = titleBar:CreateFontString(nil, "OVERLAY")
 startLine:SetFont(FONT, 11)
-startLine:SetPoint("TOPLEFT",  startInstanceLine, "TOPRIGHT",  8, 0)
 startLine:SetPoint("TOPRIGHT", titleBar, "TOPRIGHT", -28, -7)
 startLine:SetJustifyH("RIGHT")
 startLine:SetWordWrap(false)
 startLine:SetText("")
+
+-- 시작 던전의 RIGHT 앵커를 startLine TOPLEFT 에 연결 (forward 참조 해결).
+-- 결과: 시작 던전 RIGHT 정렬 → "대학대소동" 텍스트가 "출발 시간" 좌측 -8 위치에 바로 붙음.
+startInstanceLine:SetPoint("TOPRIGHT", startLine, "TOPLEFT", -8, 0)
 
 -- 2행: 경과 시간 — 우측 고정, 우측 정렬 (출발 시간과 통일).
 -- 폭은 HH:MM:SS 압축 형식 기준으로 줄여서 (220 → 160) 더 컴팩트하게.
