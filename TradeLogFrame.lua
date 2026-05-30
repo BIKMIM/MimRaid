@@ -228,24 +228,40 @@ local function createLogRow(i)
     tipBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     tipBtn:SetScript("OnEnter", function(self)
         row.highlight:Show()
+        local entry = row._logIndex and MR.TradeLog[row._logIndex]
+        local nameTruncated = row.nameText and row.nameText:IsTruncated()
+
+        -- 아이템 링크 있거나 / nameText 짤린 경우만 툴팁 표시
+        if not row._itemLink and not nameTruncated then return end
+
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+
+        -- 1. 아이템 정보 (링크 있으면)
         if row._itemLink then
-            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             GameTooltip:SetHyperlink(row._itemLink)
-            local entry = row._logIndex and MR.TradeLog[row._logIndex]
-            if entry then
-                local stateText
-                if entry.state == MR.TRADE_STATE.DONE then
-                    stateText = "|cff44ff44완납|r"
-                elseif entry.state == MR.TRADE_STATE.PARTIAL then
-                    stateText = "|cffffaa00부분납|r"
-                else
-                    stateText = "|cff888888미납|r"
-                end
-                GameTooltip:AddLine(" ")
-                GameTooltip:AddLine("거래 상태: " .. stateText)
-            end
-            GameTooltip:Show()
         end
+
+        -- 2. nameText 가 폭 초과로 짤린 경우 전체 라벨 표시 (호버로 확인 가능)
+        if nameTruncated and entry and entry.itemName then
+            if row._itemLink then GameTooltip:AddLine(" ") end
+            GameTooltip:AddLine(entry.itemName, 1, 0.82, 0, true)   -- 마지막 true = wrap
+        end
+
+        -- 3. 거래 상태
+        if entry and entry.state then
+            local stateText
+            if entry.state == MR.TRADE_STATE.DONE then
+                stateText = "|cff44ff44완납|r"
+            elseif entry.state == MR.TRADE_STATE.PARTIAL then
+                stateText = "|cffffaa00부분납|r"
+            else
+                stateText = "|cff888888미납|r"
+            end
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("거래 상태: " .. stateText)
+        end
+
+        GameTooltip:Show()
     end)
     tipBtn:SetScript("OnLeave", function()
         row.highlight:Hide()
@@ -324,13 +340,16 @@ local function refreshLogPanel()
         end
     end
 
-    -- 보스 그룹별로 묶어서 displayList 빌드 (B안)
-    -- audit entry ([거래완료]/[거래취소]) 는 디버깅용 — MR.cfg.debugMode=true 일 때만 표시.
-    -- 표시될 때도 일반 낙찰 entry 처럼 컬럼별로 분리 (구매자/받은골드/보낸골드).
+    -- 보스 그룹별로 묶어서 displayList 빌드 (B안).
+    -- 표시 규칙:
+    --   - 일반 낙찰 entry: 항상 표시
+    --   - tradeAuditType == "distribution" (분배 송금): 항상 표시 — 스트리머가 "누락" 인식 차단 목적
+    --   - tradeAuditType == "complete" / "cancelled" (audit summary): debug mode 일 때만 표시 (디버깅용)
     local showAudit = MR.cfg and MR.cfg.debugMode
     local groups = {}
     for idx, entry in ipairs(log) do
-        local hide = (entry.tradeAuditType ~= nil) and not showAudit
+        local t = entry.tradeAuditType
+        local hide = (t == "complete" or t == "cancelled") and not showAudit
         if not hide then
             local g = entry.bossGroup or 0
             groups[g] = groups[g] or {}
@@ -396,7 +415,7 @@ local function refreshLogPanel()
             row.winnerText:SetTextColor(1, 1, 1)
             row.winnerText:SetText(entry.winner or "")
 
-            if entry.tradeAuditType then
+            if entry.tradeAuditType == "complete" or entry.tradeAuditType == "cancelled" then
                 -- ── audit entry (디버그 모드 표시): 컬럼별 분리 ─────────────
                 -- 아이콘: ◆ 마커 (audit 표시), 상태: 라벨, 아이템명: 라벨+아이템요약,
                 -- 구매자: 거래대상, 판매금액: 받은골드, 실제받은금액: 보낸골드
@@ -440,41 +459,86 @@ local function refreshLogPanel()
                     row.paidText:SetText("|cff555555-|r")
                 end
             else
-                -- ── 일반 낙찰 entry ─────────────────────────────────────────
+                -- ── 일반 entry (낙찰/분배/수동거래/골드거래/아이템전달) ──────
                 row.icon:SetVertexColor(1, 1, 1)   -- 색조 리셋 (audit 이후 일반 행 영향 방지)
                 row.icon:SetTexture(entry.texture or "Interface\\Icons\\INV_Misc_QuestionMark")
-                -- "[골드 거래] 닉네임" → "[골드 거래]" 만 표시 (구매자 컬럼에 닉네임 이미 있음).
-                -- 옛 SavedVariables 호환을 위해 표시 시점에 trim.
-                local isGoldOnly = entry.itemName
-                    and type(entry.itemName) == "string"
-                    and entry.itemName:find("^%[골드 거래%]")
+
+                -- 카테고리 판정 (자체 라벨 우선, tradeOrigin 폴백)
+                local nm = entry.itemName
+                local isStr = nm and type(nm) == "string"
+                local isGoldOnly     = isStr and nm:find("^%[골드 거래%]")
+                local isDistribution = entry.tradeAuditType == "distribution"
+                    or (isStr and nm:find("^%[분배 송금%]"))
+                local isTransferIn   = isStr and nm:find("^%[아이템 받음%]")
+                local isTransferOut  = isStr and nm:find("^%[아이템 전달%]")
+                local origin         = entry.tradeOrigin   -- "auction" / "manual" / nil
+
+                -- 아이템명 컬럼: 카테고리별 라벨 + 본문
                 if isGoldOnly then
                     row.nameText:SetText("|cffaaaaaa[골드 거래]|r")
+                elseif isDistribution then
+                    -- 공대장 → 공대원 골드 송금. 라벨 [골드 거래] 로 통일 (분배/일반 자동 구분 어려움).
+                    -- 방향은 stateIcon "송금" + 받은금액 컬럼 (-) 주황으로 식별.
+                    row.nameText:SetText("|cffaaaaaa[골드 거래]|r")
+                elseif isTransferIn or isTransferOut then
+                    row.nameText:SetText(nm)   -- 이미 "[아이템 전달/받음]" 라벨 포함
+                elseif origin == "auction" then
+                    row.nameText:SetText("|cffffcc44[경매판매]|r " .. (nm or "?"))
+                elseif origin == "manual" then
+                    row.nameText:SetText("|cffffaa44[수동거래]|r " .. (nm or "?"))
                 else
-                    row.nameText:SetText(entry.itemName)
+                    row.nameText:SetText(nm or "?")
                 end
+
+                -- 판매금액 / 실제받은금액 / 상태 컬럼
                 local paid = entry.paidGold or 0
                 local bid  = entry.bid or 0
-                -- 골드 거래는 "낙찰가" 개념이 없으므로 판매금액 컬럼 비움 (받은 금액만 표시).
-                if isGoldOnly then
+                if isDistribution then
+                    -- 공대장 송금: 판매금액 비움, 송금액을 받은금액 컬럼에 주황 (-) 표시.
+                    -- stateIcon "송금" 으로 받은 골드 거래 ("완납") 와 방향 구분.
                     row.bidText:SetText("|cff555555-|r")
+                    local g = entry.distributionGold or 0
+                    row.paidText:SetText(g > 0
+                        and ("|cffff8844-" .. MR.FormatGold(g) .. "|r")
+                        or "|cff555555-|r")
+                    row.stateIcon:SetText("|cffff8844송금|r")
+                elseif isTransferOut then
+                    -- 공대장→공대원 아이템 전달: 판매 아님 (둘 다 - 표시)
+                    row.bidText:SetText("|cff555555-|r")
+                    row.paidText:SetText("|cff555555-|r")
+                    row.stateIcon:SetText("|cffaaccaa전달|r")
+                elseif isTransferIn then
+                    -- 공대원→공대장 아이템 받음: 판매 아님 (둘 다 - 표시)
+                    row.bidText:SetText("|cff555555-|r")
+                    row.paidText:SetText("|cff555555-|r")
+                    row.stateIcon:SetText("|cffccaaaa받음|r")
+                elseif origin == "manual" then
+                    -- 수동거래: 경매 낙찰 아님 → "판매금액" 컬럼 비움. 받은 금액만 표시.
+                    row.bidText:SetText("|cff555555-|r")
+                    row.paidText:SetText("|cff44ff44" .. MR.FormatGold(paid) .. "|r")
+                    row.stateIcon:SetText("|cffffaa44수동|r")
                 else
-                    row.bidText:SetText("|cffFFCC00" .. MR.FormatGold(bid) .. "|r")
-                end
-                if entry.state == MR.TRADE_STATE.DONE then
-                    -- 한글 라벨 통일: 완납/부분납/미납 + audit 의 완료/취소
-                    row.stateIcon:SetText("|cff44ff44완납|r")
-                    if paid > bid and not isGoldOnly then
-                        row.paidText:SetText("|cffff8844" .. MR.FormatGold(paid) .. "|r")
+                    -- 판매금액
+                    if isGoldOnly then
+                        row.bidText:SetText("|cff555555-|r")
                     else
-                        row.paidText:SetText("|cff44ff44" .. MR.FormatGold(paid) .. "|r")
+                        row.bidText:SetText("|cffFFCC00" .. MR.FormatGold(bid) .. "|r")
                     end
-                elseif entry.state == MR.TRADE_STATE.PARTIAL then
-                    row.stateIcon:SetText("|cffffaa00부분납|r")
-                    row.paidText:SetText("|cffff4444" .. MR.FormatGold(paid) .. "|r")
-                else
-                    row.stateIcon:SetText("|cff888888미납|r")
-                    row.paidText:SetText("|cff888888-|r")
+                    -- 상태 + 실제받은금액
+                    if entry.state == MR.TRADE_STATE.DONE then
+                        row.stateIcon:SetText("|cff44ff44완납|r")
+                        if paid > bid and not isGoldOnly then
+                            row.paidText:SetText("|cffff8844" .. MR.FormatGold(paid) .. "|r")
+                        else
+                            row.paidText:SetText("|cff44ff44" .. MR.FormatGold(paid) .. "|r")
+                        end
+                    elseif entry.state == MR.TRADE_STATE.PARTIAL then
+                        row.stateIcon:SetText("|cffffaa00부분납|r")
+                        row.paidText:SetText("|cffff4444" .. MR.FormatGold(paid) .. "|r")
+                    else
+                        row.stateIcon:SetText("|cff888888미납|r")
+                        row.paidText:SetText("|cff888888-|r")
+                    end
                 end
             end
         elseif row then

@@ -218,13 +218,17 @@ function MR.TradeLog.Save()
             timestamp = entry.timestamp,
             bossGroup = entry.bossGroup or 0,
             -- T-Raid 식 검증용 audit 필드 (v1.0.91+):
-            --   tradeAuditType="complete"|"cancelled", tradeReceivedCopper, tradeSentCopper
+            --   tradeAuditType="complete"|"cancelled"|"distribution", tradeReceivedCopper, tradeSentCopper
             --   v1.0.92+: 컬럼 분리 표시를 위한 raw 아이템 링크 리스트
+            --   v0.9.105+: tradeOrigin="auction"|"manual" (거래기록 탭 라벨 표시용)
+            --   v0.9.105+: distributionGold (분배 송금 entry 의 실제 송금 금액)
             tradeAuditType      = entry.tradeAuditType,
             tradeReceivedCopper = entry.tradeReceivedCopper,
             tradeSentCopper     = entry.tradeSentCopper,
             tradeReceivedItems  = entry.tradeReceivedItems,
             tradeSentItems      = entry.tradeSentItems,
+            tradeOrigin         = entry.tradeOrigin,
+            distributionGold    = entry.distributionGold,
         }
     end
 end

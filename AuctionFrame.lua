@@ -135,19 +135,28 @@ elapsedLine:SetJustifyH("RIGHT")
 elapsedLine:SetWordWrap(false)
 elapsedLine:SetText("")
 
--- 2행: 시간리셋 버튼 — elapsedLine 바로 좌측에 세로 중앙 정렬
+-- 2행: 타이머 버튼 — 상태에 따라 "타이머시작" / "타이머리셋" 토글.
+-- 미시작: 클릭 시 수동 시작 ("타이머시작")
+-- 시작됨: 클릭 시 리셋 확인 팝업 ("타이머리셋")
+-- 자동 시작 경로는 그대로 (레이드 첫 전투 / 5인쐐기 CHALLENGE_MODE_START)
 local timerResetBtn = CreateFrame("Button", nil, titleBar, "UIPanelButtonTemplate")
 timerResetBtn:SetSize(72, 24)
 timerResetBtn:SetPoint("RIGHT", elapsedLine, "LEFT", -8, 0)
-timerResetBtn:SetText("시간리셋")
+timerResetBtn:SetText("타이머시작")   -- 초기 라벨 (미시작)
 do
     local fs = timerResetBtn:GetFontString()
     if fs then fs:SetFont(FONT, 11) end
 end
-timerResetBtn:Hide()
+-- 초기엔 보이게 (이전엔 Hide). 수동 시작 가능하도록.
 timerResetBtn:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:SetText("레이드 타이머 초기화", 1, 1, 1)
+    local started = MR.RaidTimer and MR.RaidTimer.GetElapsed and MR.RaidTimer.GetElapsed()
+    if started then
+        GameTooltip:SetText("레이드 타이머 초기화", 1, 1, 1)
+    else
+        GameTooltip:SetText("레이드 타이머 수동 시작", 1, 1, 1)
+        GameTooltip:AddLine("레이드 첫 전투 / 쐐기돌 사용 시 자동 시작됨", 0.7, 0.7, 0.7, true)
+    end
     GameTooltip:Show()
 end)
 timerResetBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -161,7 +170,8 @@ StaticPopupDialogs["MIMRAID_TIMER_RESET_CONFIRM"] = {
             startLine:SetText("")
             startInstanceLine:SetText("")
             elapsedLine:SetText("")
-            timerResetBtn:Hide()
+            -- 리셋 후엔 다시 "타이머시작" 라벨로 — OnUpdate 가 다음 tick 에 갱신해주긴 하지만 즉시 반영
+            timerResetBtn:SetText("타이머시작")
             MR.Print("레이드 타이머 초기화", MR.COLOR.gray)
         end
     end,
@@ -171,7 +181,13 @@ StaticPopupDialogs["MIMRAID_TIMER_RESET_CONFIRM"] = {
     preferredIndex = 3,
 }
 timerResetBtn:SetScript("OnClick", function()
-    StaticPopup_Show("MIMRAID_TIMER_RESET_CONFIRM")
+    local started = MR.RaidTimer and MR.RaidTimer.GetElapsed and MR.RaidTimer.GetElapsed()
+    if started then
+        StaticPopup_Show("MIMRAID_TIMER_RESET_CONFIRM")
+    elseif MR.RaidTimer and MR.RaidTimer.Start then
+        MR.RaidTimer.Start(true)   -- isManual=true (사용자 가시 메시지 출력)
+        timerResetBtn:SetText("타이머리셋")   -- 즉시 라벨 변경
+    end
 end)
 
 -- 2행: 레이드 초기화 버튼 — 시간리셋 버튼 좌측에 딱 붙여서 (간격 0).
@@ -260,7 +276,9 @@ titleBar:SetScript("OnUpdate", function(_, elapsed)
         startLine:SetText("|cff444444출발 시간 :  - - -|r")
         startInstanceLine:SetText("")
         elapsedLine:SetText("|cff444444경과 :  - - -|r")
-        timerResetBtn:Hide()
+        -- 미시작 상태: 버튼 표시 + "타이머시작" 라벨 (수동 시작 가능)
+        timerResetBtn:SetText("타이머시작")
+        timerResetBtn:Show()
         return
     end
     -- 시작 던전 이름 (RaidTimer 시작 시점에 GetInstanceInfo 로 캐시된 값)
@@ -300,6 +318,8 @@ titleBar:SetScript("OnUpdate", function(_, elapsed)
         startLine:SetTextColor(0.85, 0.85, 0.85)
     end
     elapsedLine:SetText(elapsedStr)
+    -- 시작된 상태: "타이머리셋" 라벨 (클릭 시 리셋 팝업)
+    timerResetBtn:SetText("타이머리셋")
     timerResetBtn:Show()
 end)
 
@@ -503,7 +523,7 @@ end
 
 local tabAuction = makeTab("경매대기",      12)
 makeArrow()
-local tabTrade   = makeTab("판매완료",      11)
+local tabTrade   = makeTab("거래기록",      11)
 makeArrow()
 local tabFailed  = makeTab("안팔린 아이템", 10)
 makeArrow()

@@ -1071,9 +1071,11 @@ SlashCmdList["MIMRAID"] = function(input)
         MR.Print("  /mr uitest          - 경매 대기 탭 샘플 아이템 추가", W)
         MR.Print("  /mr uitest stress   - 옵션 많은 행 추가 (2줄 fallback 검증)", W)
         MR.Print("  /mr uitest clear    - 테스트 아이템 전체 제거", W)
-        MR.Print("|cffaaddff[판매완료 탭]|r", W)
-        MR.Print("  /mr tradetest           - 판매완료 탭 샘플 데이터 추가 (DONE/PARTIAL/PENDING 혼합)", W)
+        MR.Print("|cffaaddff[거래기록 탭]|r", W)
+        MR.Print("  /mr tradetest           - 기본 샘플 (DONE/PARTIAL/PENDING 혼합)", W)
         MR.Print("  /mr tradetest clear     - TradeLog 전체 초기화", W)
+        MR.Print("  /mr scenariotest        - 종합 시나리오 (경매판매/다중낙찰/PARTIAL/수동/분배/회수/전달)", W)
+        MR.Print("  /mr scenariotest clear  - TradeLog 전체 초기화", W)
         MR.Print("|cffaaddff[T-Raid 식 검증 / 거래취소 audit]|r", W)
         MR.Print("  /mr audittest           - 골드 분배 탭 검증 패널용 audit 더미 추가 (complete + cancelled)", W)
         MR.Print("  /mr audittest match     - 일반 DONE entry 와 정합 OK 가 되는 audit 더미", W)
@@ -1164,6 +1166,117 @@ SlashCmdList["MIMRAID"] = function(input)
         MR.Print(string.format(
             "TradeLog 테스트 데이터 추가 완료 (%d개)  |cff888888초기화: /mr tradetest clear|r",
             #MR.TradeLog), MR.COLOR.gold)
+        return
+    end
+
+    -- /mr scenariotest        : 거래기록 탭 종합 시나리오 (경매판매/다중낙찰/PARTIAL/수동거래/분배/회수/전달 등)
+    -- /mr scenariotest clear  : 전체 TradeLog 초기화
+    if cmd == "scenariotest" then
+        local mode = (rest or ""):lower():gsub("^%s*(.-)%s*$", "%1")
+        if mode == "clear" then
+            MR.TradeLog.Clear()
+            MR.Print("거래기록 시나리오 초기화", MR.COLOR.gray)
+            return
+        end
+
+        -- 보스 이름 설정 (구분선 표시용)
+        if MR.ItemList and MR.ItemList.bossNames then
+            MR.ItemList.bossNames[1] = "[테스트] 1보스 - 사론"
+            MR.ItemList.bossNames[2] = "[테스트] 2보스 - 카라잔"
+        end
+
+        -- 헬퍼: 일반 sale (경매판매 / 수동거래)
+        local function addSale(itemName, texture, winner, bid, paid, origin, bossGroup)
+            local i = MR.TradeLog.Add(nil, itemName, texture, winner, bid, bossGroup or 1)
+            local e = MR.TradeLog[i]
+            if e then e.tradeOrigin = origin end
+            if paid ~= nil then MR.TradeLog.UpdateTrade(i, paid) end
+            return i
+        end
+
+        -- 헬퍼: 공대장 골드 송금 (라벨 [골드 거래] 통일, 방향은 distributionGold 로 보존)
+        local function addDistribution(target, gold)
+            local i = MR.TradeLog.Add(nil, "[골드 거래]", nil, target, 0, 0)
+            local e = MR.TradeLog[i]
+            if e then
+                e.tradeAuditType   = "distribution"
+                e.distributionGold = gold
+            end
+            MR.TradeLog.UpdateTrade(i, 0)
+        end
+
+        -- 헬퍼: 골드 거래 (공대원 → 공대장 골드만)
+        local function addGoldOnly(source, gold)
+            local i = MR.TradeLog.Add(nil, "[골드 거래]", nil, source, gold, 0)
+            MR.TradeLog.UpdateTrade(i, gold)
+        end
+
+        -- 헬퍼: 아이템 전달 (공대장 → 공대원)
+        local function addTransferOut(target, label)
+            local nm = "[아이템 전달] " .. (label or "?")
+            local i = MR.TradeLog.Add(nil, nm, nil, target, 0, 0)
+            MR.TradeLog.UpdateTrade(i, 0)
+        end
+
+        -- 헬퍼: 아이템 받음 (공대원 → 공대장 아이템만)
+        local function addTransferIn(source, label)
+            local nm = "[아이템 받음] " .. (label or "?")
+            local i = MR.TradeLog.Add(nil, nm, nil, source, 0, 0)
+            MR.TradeLog.UpdateTrade(i, 0)
+        end
+
+        -- ── 1보스 ─────────────────────────────────────────────────────────
+        -- [시나리오 1] 정상 경매판매 (1명 1아이템)
+        addSale("폭풍의 칼날", "Interface\\Icons\\INV_Sword_04",
+            "김철수", 50000, 50000, "auction", 1)
+
+        -- [시나리오 2] 1명 다중 낙찰 (3아이템) — 모두 한 거래에 완납
+        addSale("태양의 두손검", "Interface\\Icons\\INV_Sword_2H_06",
+            "이영희", 30000, 30000, "auction", 1)
+        addSale("달빛 지팡이", "Interface\\Icons\\INV_Staff_13",
+            "이영희", 20000, 20000, "auction", 1)
+        addSale("영원의 반지", "Interface\\Icons\\INV_Jewelry_Ring_01",
+            "이영희", 15000, 15000, "auction", 1)
+
+        -- [시나리오 3] 1명 다중 낙찰 + 1회차 부분 납입 (아이템은 다 받아감, 골드는 잔액 남음)
+        -- 박민준: 두 번째 entry PARTIAL → 2회차 거래에서 잔액 30000 추가 시 DONE
+        addSale("심연의 가슴갑옷", "Interface\\Icons\\INV_Chest_Plate02",
+            "박민준", 40000, 40000, "auction", 2)
+        addSale("용의 투구", "Interface\\Icons\\INV_Helmet_08",
+            "박민준", 60000, 30000, "auction", 2)   -- ← PARTIAL (잔액 30000)
+
+        -- [시나리오 4] 안팔린 아이템 수동 거래 (애드온 매칭 X)
+        addSale("부서진 보주 (안팔린→수동)", "Interface\\Icons\\INV_Misc_Gem_Pearl_03",
+            "정하나", 10000, 10000, "manual", 2)
+
+        -- ── 보스 외 ─────────────────────────────────────────────────────────
+        -- [시나리오 5] ItemList 에도 없는 아이템 수동 거래
+        addSale("외부 아이템 (수동)", "Interface\\Icons\\INV_Misc_QuestionMark",
+            "강도윤", 5000, 5000, "manual", 0)
+
+        -- [시나리오 6] 골드 분배 over → 일부 회수
+        -- 공대원E 에게 1.2만 분배 (의도 1만 over). 0.2만 회수
+        addDistribution("공대원E", 12000)
+        addGoldOnly("공대원E", 2000)
+
+        -- [시나리오 7] 아이템 전달 (공대장 → 공대원 그냥 주기, 골드 0)
+        addTransferOut("공대원F", "|cffa335ee[선물 아이템]|r")
+
+        -- [시나리오 8] 아이템 받음 (공대원 → 공대장 그냥 보내기, 골드 0)
+        addTransferIn("공대원G", "|cff0070dd[반환 아이템]|r")
+
+        -- [시나리오 9] 정상 분배 (공대장 → 공대원 골드만)
+        addDistribution("공대원H", 8000)
+        addDistribution("공대원I", 8000)
+
+        -- [시나리오 10] PENDING (거래 전, 미납 상태)
+        addSale("미납 검 (PENDING 테스트)", "Interface\\Icons\\INV_Sword_05",
+            "최수진", 25000, nil, "auction", 1)   -- paid=nil → PENDING
+
+        MR.Print(string.format(
+            "거래기록 시나리오 추가 완료 (총 %d entry)  |cff888888초기화: /mr scenariotest clear|r",
+            #MR.TradeLog), MR.COLOR.gold)
+        MR.Print("거래기록 탭 / 골드 분배 탭 / 레이드 완료 기록 탭 모두 확인해보세요", MR.COLOR.gray)
         return
     end
 

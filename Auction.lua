@@ -449,6 +449,11 @@ function MR.Auction.Sold()
             local wName = sortedBids[i].name
             local wLink = linkAssign[i]
             local logIdx = MR.TradeLog.Add(wLink, item.itemName, item.texture, wName, uniformPrice, item.bossGroup)
+            -- 거래기록 탭에서 "[경매판매]" 라벨 표시용 (수동거래와 시각 구분)
+            do
+                local e = MR.TradeLog[logIdx]
+                if e then e.tradeOrigin = "auction"; if MR.TradeLog.Save then MR.TradeLog.Save() end end
+            end
 
             -- 가상 낙찰 거래가 Sold() 전에 완료되었던 경우: 디퍼된 paidGold 즉시 적용.
             -- 매칭 우선순위: (1) name + paidGold==uniformPrice 정확 일치, (2) name + bid==uniformPrice,
@@ -1090,6 +1095,11 @@ end
 --------------------------------------------------------------------------------
 -- 징표자 거래 시 파티 분배금 자동 입력
 -- settlement.perPerson × 해당 공대원 서브그룹 인원수 → 거래창 골드란에 세팅
+--
+-- ⚠ DEAD CODE (호출 비활성화됨, v0.9.107~):
+--   WoW 11.x 에서 GetRaidTargetIndex / UnitName 등이 secret-tainted 되어 전투/거래 컨텍스트에서
+--   ADDON_ACTION_FORBIDDEN 자주 발생. 그래서 OnTradeShow 의 호출을 모두 제거했음 (line ~1573 참고).
+--   본체는 향후 옵션 부활 가능성 대비해 그대로 보존. 호출하지 말 것.
 --------------------------------------------------------------------------------
 function MR.Auction.TryAutoFillDistributionGold()
     local tradeUnit = UnitExists("NPC") and "NPC" or "target"
@@ -1166,6 +1176,22 @@ function MR.Auction.RecordDistribution(targetName, paidGold)
         MR.RaidHistory.AddDistribution(targetName, paidGold, status)
     end
     if MR.RefreshHistoryPanel then MR.RefreshHistoryPanel() end
+
+    -- 거래기록 탭 가시화: 공대장이 골드 송금한 거래도 TradeLog 에 entry 추가.
+    -- 라벨은 "[골드 거래]" 로 통일 (분배인지 일반 송금인지 자동 구분 어려워 의미 분류 통합).
+    -- 방향(보냄)은 거래기록 탭에서 받은금액 컬럼 (-) 주황 + stateIcon "송금" 으로 식별.
+    -- bid=0/paidGold=0 이라 분배 풀(bidTotal/paidTotal)에는 영향 없음 — 실제 송금 정보는
+    -- distributionGold 필드 + RaidHistory.distributions 에 보존.
+    if MR.TradeLog and MR.TradeLog.Add then
+        local logIdx = MR.TradeLog.Add(nil, "[골드 거래]", nil, targetName, 0, 0)
+        local entry = MR.TradeLog[logIdx]
+        if entry then
+            entry.tradeAuditType    = "distribution"   -- 분배 풀 제외 + 표시 분기 (내부 키, 사용자 노출 X)
+            entry.distributionGold  = paidGold
+            if MR.TradeLog.Save then MR.TradeLog.Save() end
+        end
+        MR.TradeLog.UpdateTrade(logIdx, 0)   -- DONE 상태로
+    end
 
     MR.Print(string.format("분배 완료: %s ← %s", targetName, MR.FormatGold(paidGold)), MR.COLOR.green)
 end
@@ -1547,16 +1573,18 @@ function MR.Auction.OnTradeShow()
         -- 차단은 안 함 — 정당한 분배/기여 거래일 수도 있음. 안내만 띄우고 fall through.
     end
     -- (target ~= topBidder 인 경우) 기존 OnTradeShow 흐름 그대로:
-    -- 아래쪽 lastWinner / TryAutoFillDistributionGold 분기로 자연 진입
+    -- 아래쪽 lastWinner 분기로 자연 진입.
+    -- ※ TryAutoFillDistributionGold (징표자 자동 분배금 입력) 호출은 비활성화됨 —
+    --   WoW 11.x 에서 GetRaidTargetIndex / UnitName 등이 secret-tainted 되어 전투 컨텍스트에서
+    --   ADDON_ACTION_FORBIDDEN 에러를 자주 유발. 공대장이 거래창에 분배금을 직접 입력해야 함.
+    --   ([분배 송금] entry 자체는 OnTradeAccept 의 RecordDistribution 분기에서 그대로 생성됨)
 
     -- pendingWinners에 없으면 단독 lastWinner 확인
     if not MR.Auction.lastWinner then
-        MR.Auction.TryAutoFillDistributionGold()
         return
     end
 
     if not MR.NamesMatch(tradeTarget, MR.Auction.lastWinner) then
-        MR.Auction.TryAutoFillDistributionGold()
         return
     end
 
@@ -1876,7 +1904,7 @@ function MR.Auction.OnTradeAccept()
         local targetCopper = MR.Auction._lastTargetCopper or 0
         local myCopper     = MR.Auction._lastMyCopper or 0
 
-        -- 안팔린 아이템 판매 우선 처리
+        -- 안팔린 아이템 판매 우선 처리 (placedFailed = 공대장 거래슬롯에 올린 FailedItems)
         if #placedFailed > 0 and targetCopper > 0 then
             local available = math.floor(targetCopper / 10000)
             local leftover = processPlacedFailedSale(available)
@@ -1886,17 +1914,98 @@ function MR.Auction.OnTradeAccept()
             return
         end
 
-        -- ctw 비어있음: tradeTarget 의 낙찰 기록을 못 찾음.
-        if targetCopper > 0 and myCopper == 0 then
-            local paidGold = math.floor(targetCopper / 10000)
-            MR.Auction.RecordContribution(tradeTarget, paidGold)
-        elseif myCopper > 0 then
-            local paidGold = math.floor(myCopper / 10000)
-            MR.Auction.RecordDistribution(tradeTarget, paidGold)
-        else
-            MR.Print(string.format("[거래감지] '%s' 낙찰 기록 없음 (lastWinner=%s)",
-                tradeTarget, tostring(MR.Auction.lastWinner)), MR.COLOR.red)
+        -- 거래창의 양쪽 슬롯 아이템 수집 (TradeAnnounce snapshot)
+        local snap = MR.TradeAnnounce and MR.TradeAnnounce.GetSnapshot and MR.TradeAnnounce.GetSnapshot()
+        local function _collectSnapItems(items)
+            local out = {}
+            if not items then return out end
+            for slot = 1, 7 do
+                local it = items[slot]
+                if it and it.link then table.insert(out, it) end
+            end
+            return out
         end
+        local pItems = _collectSnapItems(snap and snap.playerItems)   -- 공대장이 보낸 아이템
+        local tItems = _collectSnapItems(snap and snap.targetItems)   -- 공대원이 보낸 아이템
+        local paidG  = math.floor(targetCopper / 10000)               -- 공대원→공대장 골드
+        local sentG  = math.floor(myCopper / 10000)                   -- 공대장→공대원 골드
+
+        -- 헬퍼: 아이템 N개 + 가격 P 골드 → 각 아이템마다 TradeLog entry 추가 (가격은 N등분, 끝자리는 마지막).
+        -- audit=true 면 paidGold=0, bid=0 (분배 풀 영향 없음, "[아이템 전달]" 라벨)
+        local function _addItemSales(items, price, isAuditTransfer)
+            local n = #items
+            if n == 0 then return end
+            if isAuditTransfer then
+                -- 공대장이 공대원에게 아이템 전달 (분배 풀 영향 X)
+                for _, it in ipairs(items) do
+                    local label = "[아이템 전달]"
+                    local logIdx = MR.TradeLog.Add(it.link, label, nil, tradeTarget, 0, 0)
+                    MR.TradeLog.UpdateTrade(logIdx, 0)
+                end
+            else
+                -- 공대원이 공대장에게 판매 (분배 풀 합산) — "[수동거래]" 라벨로 식별
+                local per = math.floor(price / n)
+                for idx, it in ipairs(items) do
+                    local thisPay = (idx == n) and (price - per * (n - 1)) or per
+                    local nm = it.name or (it.link and it.link:match("|h%[(.-)%]|h")) or "?"
+                    local logIdx = MR.TradeLog.Add(it.link, nm, nil, tradeTarget, thisPay, 0)
+                    local e = MR.TradeLog[logIdx]
+                    if e then e.tradeOrigin = "manual" end
+                    MR.TradeLog.UpdateTrade(logIdx, thisPay)
+                end
+                if MR.TradeLog.Save then MR.TradeLog.Save() end
+            end
+        end
+
+        -- ── 케이스 분류 (수동 거래, ItemList 매칭 못한 경우) ──
+        -- A. 공대원→공대장 아이템+골드 : 일반 sale 처럼 기록 (자동 경매 안 거친 수동 판매)
+        if paidG > 0 and #tItems > 0 then
+            _addItemSales(tItems, paidG, false)
+            MR.Print(string.format(
+                "[수동 판매] %s 가 아이템 %d개 + %s 보냄 → 일반 판매로 기록",
+                MR.BaseName(tradeTarget) or tradeTarget, #tItems, MR.FormatGold(paidG)),
+                MR.COLOR.gold)
+            return
+        end
+
+        -- B. 공대원→공대장 골드만 : [골드 거래] (기존 동작)
+        if paidG > 0 and #tItems == 0 then
+            MR.Auction.RecordContribution(tradeTarget, paidG)
+            return
+        end
+
+        -- C. 공대원→공대장 아이템만 (골드 0) : 환원/반환 등. audit-like 로 기록
+        if paidG == 0 and #tItems > 0 and sentG == 0 and #pItems == 0 then
+            for _, it in ipairs(tItems) do
+                local logIdx = MR.TradeLog.Add(
+                    it.link, "[아이템 받음]", nil, tradeTarget, 0, 0)
+                MR.TradeLog.UpdateTrade(logIdx, 0)
+            end
+            MR.Print(string.format(
+                "[수동 거래] %s 가 아이템 %d개 보냄 (골드 없음, 기록만)",
+                MR.BaseName(tradeTarget) or tradeTarget, #tItems), MR.COLOR.gold)
+            return
+        end
+
+        -- D, E, F: 공대장 → 공대원 (분배/전달)
+        if sentG > 0 or #pItems > 0 then
+            -- D/F. 골드 분배 부분 (있으면)
+            if sentG > 0 then
+                MR.Auction.RecordDistribution(tradeTarget, sentG)
+            end
+            -- E/F. 아이템 전달 부분 (있으면) — audit-like (분배 풀 영향 X)
+            if #pItems > 0 then
+                _addItemSales(pItems, 0, true)
+                MR.Print(string.format(
+                    "[수동 분배] %s 에게 아이템 %d개 전달 (기록만, 골드 영향 없음)",
+                    MR.BaseName(tradeTarget) or tradeTarget, #pItems), MR.COLOR.gold)
+            end
+            return
+        end
+
+        -- 빈 거래 (양쪽 다 0, 아이템 없음) — 진단 메시지
+        MR.Print(string.format("[거래감지] '%s' 빈 거래 감지 (lastWinner=%s)",
+            tradeTarget, tostring(MR.Auction.lastWinner)), MR.COLOR.red)
         return
     end
 
