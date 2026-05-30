@@ -197,8 +197,13 @@ handlers["ENCOUNTER_END"] = function(encounterID, encounterName, difficultyID, _
     MR.Debug("[ROLL-OBS] ENCOUNTER_END " .. _lastEncounterInfo)
 end
 
-handlers["GET_ITEM_INFO_RECEIVED"] = function()
+handlers["GET_ITEM_INFO_RECEIVED"] = function(itemID, success)
+    -- FlushPending: ItemList.Add 단계의 pendingQueue 재처리 (기존)
     MR.ItemList.FlushPending()
+    -- OnItemInfoReceived: OnChatLoot 단계의 _pendingLoot 큐 재처리 (신규 — 지연 입수 케이스)
+    if MR.ItemList.OnItemInfoReceived then
+        MR.ItemList.OnItemInfoReceived(itemID, success)
+    end
 end
 
 -- CHAT_MSG_* sender 는 전투/크로스렐름에서 secret string 으로 올 수 있음.

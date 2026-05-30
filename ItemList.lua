@@ -493,6 +493,44 @@ end
 -- 최신 레이드 주사위/차비 낙찰은 루팅 창 없이 바로 가방행 → LOOT_OPENED 미발동
 -- 이 경로로 "당신이 획득: [링크]" 메시지를 파싱해서 자동 등록
 --------------------------------------------------------------------------------
+-- 캐시 미준비 LOOT 의 retry 큐.
+-- 시간 지연 입수 (예: 공대원 모두 포기 후 자동 입수) 시 GetItemInfo 가 quality=nil 반환
+-- → 큐에 보관 후 GET_ITEM_INFO_RECEIVED 이벤트마다 재확인. 30초 timeout.
+-- bossGroup 도 큐에 캡쳐 (consume 시점 기준) → retry 시 정확한 그룹으로 분류.
+local _pendingLoot = {}   -- { {link, count, bossGroup, ts}, ... }
+local PENDING_TTL = 30    -- 30초 후 자동 폐기
+
+-- pendingNewBossGroup 를 consume 하고 현재 bossGroup 반환. ItemList.Add 호출 직전에만 호출.
+local function _consumeBossGroupAndGet()
+    if pendingNewBossGroup then
+        MR.ItemList.currentBossGroup = MR.ItemList.currentBossGroup + 1
+        pendingNewBossGroup = false
+        if pendingBossName and pendingBossName ~= "" then
+            MR.ItemList.bossNames[MR.ItemList.currentBossGroup] = pendingBossName
+            MR.Debug(string.format(
+                "CHAT_MSG_LOOT: boss group %d -> name=%s",
+                MR.ItemList.currentBossGroup, pendingBossName))
+        end
+        pendingBossName = nil
+        MR.Debug("CHAT_MSG_LOOT: consumed pending boss group -> " ..
+            MR.ItemList.currentBossGroup)
+    end
+    return MR.ItemList.currentBossGroup
+end
+
+-- 실제 ItemList.Add 호출 + dedup
+local function _doAdd(link, count, bossGroup)
+    for _ = 1, count do
+        if tryConsumeLootMark(link) then
+            MR.Debug("CHAT_MSG_LOOT skip: dedup (LOOT_OPENED already added) " .. link)
+        else
+            MR.Debug(string.format(
+                "CHAT_MSG_LOOT add: link=%s group=%d", link, bossGroup))
+            MR.ItemList.Add(link, "loot", "auto", nil, bossGroup)
+        end
+    end
+end
+
 function MR.ItemList.OnChatLoot(msg)
     -- 크로스렐름 등에서 msg가 시크릿 스트링으로 들어올 수 있음 → `==`로 비교하면 taint 에러.
     -- nil 체크만 하고 빈 문자열은 아래 패턴매칭이 자연스럽게 처리 (string:match는 시크릿 문자열에 안전).
@@ -525,8 +563,22 @@ function MR.ItemList.OnChatLoot(msg)
         "CHAT_MSG_LOOT match: name=%s quality=%s count=%d link=%s",
         tostring(itemName), tostring(quality), count, link))
 
+    -- 캐시 미준비: pending 큐에 보관 후 GET_ITEM_INFO_RECEIVED 이벤트에서 재시도.
+    -- 시간 지연 입수 케이스 (공대원 전체 포기 후 자동 입수) 대응. bossGroup 도 함께 캡쳐.
     if not quality then
-        MR.Debug("CHAT_MSG_LOOT skip: item-not-cached (GET_ITEM_INFO_RECEIVED 대기)")
+        -- 강제 캐시 요청 (있으면)
+        local itemID = tonumber(link:match("item:(%d+)"))
+        if itemID and C_Item.RequestLoadItemDataByID then
+            pcall(C_Item.RequestLoadItemDataByID, itemID)
+        end
+        local bossGroup = _consumeBossGroupAndGet()
+        table.insert(_pendingLoot, {
+            link = link, count = count, bossGroup = bossGroup, ts = time(),
+            itemID = itemID,
+        })
+        MR.Debug(string.format(
+            "CHAT_MSG_LOOT queued (not-cached): link=%s group=%d (큐 크기=%d)",
+            link, bossGroup, #_pendingLoot))
         return
     end
     if quality < threshold then
@@ -536,28 +588,44 @@ function MR.ItemList.OnChatLoot(msg)
         return
     end
 
-    if pendingNewBossGroup then
-        MR.ItemList.currentBossGroup = MR.ItemList.currentBossGroup + 1
-        pendingNewBossGroup = false
-        if pendingBossName and pendingBossName ~= "" then
-            MR.ItemList.bossNames[MR.ItemList.currentBossGroup] = pendingBossName
-            MR.Debug(string.format(
-                "CHAT_MSG_LOOT: boss group %d -> name=%s",
-                MR.ItemList.currentBossGroup, pendingBossName))
-        end
-        pendingBossName = nil
-        MR.Debug("CHAT_MSG_LOOT: consumed pending boss group -> " ..
-            MR.ItemList.currentBossGroup)
-    end
-    local bossGroup = MR.ItemList.currentBossGroup
+    local bossGroup = _consumeBossGroupAndGet()
+    _doAdd(link, count, bossGroup)
+end
 
-    for _ = 1, count do
-        if tryConsumeLootMark(link) then
-            MR.Debug("CHAT_MSG_LOOT skip: dedup (LOOT_OPENED already added) " .. link)
-        else
+-- GET_ITEM_INFO_RECEIVED 이벤트에서 호출. pending 큐 재처리.
+-- 인자는 사용 안 함 — 큐 전체 재확인이 더 robust (어떤 itemID 가 늦게 도착하든 관련 pending 모두 검사).
+-- TTL 30초 넘은 항목은 큐에서 제거 (영구 캐시 실패 케이스 방어).
+---@diagnostic disable-next-line: unused-local
+function MR.ItemList.OnItemInfoReceived(itemID, success)
+    if #_pendingLoot == 0 then return end
+    local threshold = MR.cfg.lootQualityThreshold or 4
+    local now = time()
+
+    -- 역순 순회 (table.remove 안전)
+    for i = #_pendingLoot, 1, -1 do
+        local p = _pendingLoot[i]
+        -- TTL 초과 → 폐기
+        if now - p.ts > PENDING_TTL then
             MR.Debug(string.format(
-                "CHAT_MSG_LOOT add: link=%s group=%d", link, bossGroup))
-            MR.ItemList.Add(link, "loot", "auto", nil, bossGroup)
+                "CHAT_MSG_LOOT pending timeout (%ds): %s — 폐기",
+                PENDING_TTL, p.link))
+            table.remove(_pendingLoot, i)
+        else
+            local _, _, q = C_Item.GetItemInfo(p.link)
+            if q then
+                table.remove(_pendingLoot, i)
+                if q >= threshold then
+                    MR.Debug(string.format(
+                        "CHAT_MSG_LOOT pending resolved: %s quality=%d group=%d",
+                        p.link, q, p.bossGroup))
+                    _doAdd(p.link, p.count, p.bossGroup)
+                else
+                    MR.Debug(string.format(
+                        "CHAT_MSG_LOOT pending skip low-quality: %s quality=%d",
+                        p.link, q))
+                end
+            end
+            -- 아직 캐시 안 됨 → 큐에 남겨두고 다음 이벤트 대기
         end
     end
 end

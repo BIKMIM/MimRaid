@@ -2,7 +2,7 @@
 ## Title: MimRaid
 ## Notes: 밈주머니를 위한 레이드 애드온. 애기야 사랑해!!
 ## Author: MimRaid
-## Version: 0.9.104
+## Version: 0.9.105
 ## SavedVariables: MimRaidDB
 
 Libs\LibStub\LibStub.lua
