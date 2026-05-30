@@ -39,9 +39,27 @@ if errorlevel 1 (
 rem Show last commit subject
 set LAST_COMMIT=
 for /f "delims=" %%i in ('git log -1 --format^=%%s 2^>nul') do set LAST_COMMIT=%%i
+
+rem === Compute suggested commit message ===
+rem 1순위: .deploy-msg 파일 (Claude 가 작업 끝낼 때 구체 메시지 박아둠)
+rem 2순위: git status --short 의 변경 .lua/.xml/.toc 파일명 → "Update file1, file2"
+rem        MimRaid.toc / Settings.lua 는 매 deploy 마다 자동 변경되므로 잡음 회피 차원 제외.
+set "SUGGESTED="
+if exist "%~dp0.deploy-msg" (
+    set /p SUGGESTED=<"%~dp0.deploy-msg"
+)
+if "!SUGGESTED!"=="" (
+    powershell -NoProfile -Command "$f = git status --short | ForEach-Object { ($_ -replace '^...','').Trim() } | Where-Object { $_ -match '\.(lua|xml|toc)$' -and $_ -notmatch '(MimRaid\.toc|Settings\.lua)$' } | ForEach-Object { Split-Path $_ -Leaf } | Select-Object -Unique; if ($f) { 'Update ' + ($f -join ', ') } | Out-File -Encoding utf8 '%TEMP%\mimraid_msg.txt' -NoNewline" 2>nul
+    if exist "%TEMP%\mimraid_msg.txt" (
+        set /p SUGGESTED=<"%TEMP%\mimraid_msg.txt"
+        del "%TEMP%\mimraid_msg.txt" >nul 2>&1
+    )
+)
+
 if not "!LAST_COMMIT!"=="" echo Last deploy  : !LAST_COMMIT!
 echo Current ver  : %CURRENT_VER%
 echo Next version : !SUGGESTED_VER!
+if not "!SUGGESTED!"=="" echo Suggested msg: !SUGGESTED!
 echo.
 
 rem === Version prompt ===
@@ -65,7 +83,19 @@ if errorlevel 1 (
 echo.
 
 rem === Commit message prompt ===
-set /p COMMIT_MSG=Commit message [example: fix bid validation / Space = empty]:
+rem   Enter       = 추천 메시지 그대로 사용 (없으면 vX.Y.Z 만)
+rem   Space+Enter = 빈 메시지 (vX.Y.Z 만 commit 메시지로)
+rem   그 외 텍스트 = 입력한 텍스트 그대로
+if not "!SUGGESTED!"=="" (
+    echo  ----- Suggested commit message -----
+    echo    !SUGGESTED!
+    echo  ------------------------------------
+    set /p COMMIT_MSG=Commit message [Enter = use suggested / Space = empty]:
+    if "!COMMIT_MSG!"=="" set COMMIT_MSG=!SUGGESTED!
+) else (
+    set /p COMMIT_MSG=Commit message [example: fix bid validation / Space = empty]:
+)
+rem 공백 한 칸만 입력하면 "메시지 비우기" 의도로 간주
 if "!COMMIT_MSG!"==" " set COMMIT_MSG=
 echo.
 
@@ -158,6 +188,9 @@ if errorlevel 1 (
 )
 echo [3/3] Push done
 echo.
+
+rem 추천 메시지 파일 소비 후 삭제 (다음 배포에 재사용 방지)
+if exist "%~dp0.deploy-msg" del "%~dp0.deploy-msg" >nul 2>&1
 
 echo ================================
 echo    Done^^!  v!NEW_VER!

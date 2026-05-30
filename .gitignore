@@ -21,3 +21,6 @@ Desktop.ini
 # WoW 런타임 (애드온 폴더 안에 있을 일 거의 없지만 안전망)
 WTF/
 Cache/
+
+# Claude Code 가 작성하는 일회성 commit 메시지 추천 파일
+.deploy-msg
