@@ -2229,7 +2229,7 @@ local autoRollLabel = OP:CreateFontString(nil, "OVERLAY")
 autoRollLabel:SetFont(FONT, 11)
 autoRollLabel:SetTextColor(1, 1, 1)
 autoRollLabel:SetPoint("LEFT", autoRollCheck, "RIGHT", 2, 0)
-autoRollLabel:SetText("공대장/부공대장일 때 아이템 자동 수령 (주사위/전리품 골드)")
+autoRollLabel:SetText("공대장일 때 아이템 자동 수령 (주사위/전리품 골드)")
 
 local autoRollDesc = OP:CreateFontString(nil, "OVERLAY")
 autoRollDesc:SetFont(FONT, 10)
@@ -2237,7 +2237,7 @@ autoRollDesc:SetTextColor(0.5, 0.5, 0.5)
 -- 폭 고정(SetWidth)을 빼고 좌우 anchor 로 패널 폭에 맞춤 → 폰트 확대 시에도 우측 공간 활용
 autoRollDesc:SetPoint("TOPLEFT",  OP, "TOPLEFT",  28, -384)
 autoRollDesc:SetPoint("TOPRIGHT", OP, "TOPRIGHT", -8, -384)
-autoRollDesc:SetText("주사위 창이 열릴 때 공대원에게 아래 채팅을 자동 전송합니다.\n공격대에서 공대장 또는 부공대장일 때만 동작합니다. (파티/개인 인던 미동작)")
+autoRollDesc:SetText("주사위 창이 열릴 때 공대원에게 아래 채팅을 자동 전송합니다.\n공격대에서 공대장일 때만 동작합니다. (파티/개인 인던 미동작)")
 autoRollDesc:SetWordWrap(true)
 autoRollDesc:SetJustifyH("LEFT")
 

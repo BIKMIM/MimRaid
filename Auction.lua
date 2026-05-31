@@ -33,10 +33,11 @@ MR.Auction = {
 
 local AC = MR.Auction
 
--- 공격대장/부공격대장만 경매 시작 가능 (솔로/파티는 테스트 편의상 허용)
+-- 공격대장만 경매 시작 가능 (부공대장 권한 제거).
+-- 5인 던전/파티/솔로에서는 아무도 권한 없음 — 던전명/시간 표시 외엔 사용 X.
 local function canStartAuction()
-    if not IsInRaid() then return true end
-    return UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")
+    if not IsInRaid() then return false end
+    return UnitIsGroupLeader("player")
 end
 
 -- 다중 낙찰 순위 스냅샷 (순위 변동 감지용)
@@ -269,7 +270,7 @@ function MR.Auction.Start(index, isNextInSequence)
         return false
     end
     if not canStartAuction() then
-        MR.Print("공격대장 또는 부공격대장만 경매를 시작할 수 있습니다.", MR.COLOR.red)
+        MR.Print("공격대장만 경매를 시작할 수 있습니다. (레이드 인스턴스 내)", MR.COLOR.red)
         return false
     end
     if AC.state ~= MR.AUCTION_STATE.IDLE then
@@ -694,7 +695,7 @@ end
 --------------------------------------------------------------------------------
 function MR.Auction.StartSequential()
     if not canStartAuction() then
-        MR.Print("공격대장 또는 부공격대장만 경매를 시작할 수 있습니다.", MR.COLOR.red)
+        MR.Print("공격대장만 경매를 시작할 수 있습니다. (레이드 인스턴스 내)", MR.COLOR.red)
         return false
     end
     if AC.state ~= MR.AUCTION_STATE.IDLE then

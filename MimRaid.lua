@@ -407,7 +407,7 @@ handlers["START_LOOT_ROLL"] = function(rollID)
     _dumpRollObservation(rollID)
 
     if not MR.cfg.autoRollEnabled then return end
-    -- 파티/개인 인던에서는 동작 금지. 공격대이면서 공대장 또는 부공대장일 때만.
+    -- 파티/개인 인던에서는 동작 금지. 공격대이면서 공대장일 때만 (부공대장 권한 제거).
     if not IsInRaid() then
         MR.Debug("AutoRoll skip: 공격대 아님 (파티/개인 인던)")
         return
@@ -419,8 +419,8 @@ handlers["START_LOOT_ROLL"] = function(rollID)
         MR.Debug("AutoRoll skip: 레이드 인스턴스 아님 (type=" .. tostring(instanceType) .. ")")
         return
     end
-    if not (UnitIsGroupLeader("player") or UnitIsGroupAssistant("player")) then
-        MR.Debug("AutoRoll skip: 공대장/부공대장 아님")
+    if not UnitIsGroupLeader("player") then
+        MR.Debug("AutoRoll skip: 공대장 아님")
         return
     end
 
